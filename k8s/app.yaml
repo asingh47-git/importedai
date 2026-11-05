@@ -1,0 +1,166 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: legallens-data
+  namespace: legallens
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: managed-csi
+  resources:
+    requests:
+      storage: 16Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: legallens-backend
+  namespace: legallens
+spec:
+  type: ClusterIP
+  selector:
+    app: legallens-backend
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: legallens-backend
+  namespace: legallens
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: legallens-backend
+  template:
+    metadata:
+      labels:
+        app: legallens-backend
+    spec:
+      securityContext:
+        fsGroup: 10001
+        fsGroupChangePolicy: OnRootMismatch
+      containers:
+        - name: backend
+          image: aks8997-encecwbjexh2gsgu.azurecr.io/legallens-backend:latest
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 8000
+          env:
+            - name: LL_ENV
+              value: production
+            - name: LL_HOST
+              value: 0.0.0.0
+            - name: LL_PORT
+              value: "8000"
+            - name: LL_DATABASE_URL
+              value: sqlite+aiosqlite:////app/data/legallens.db
+            - name: LL_DATA_DIR
+              value: /app/data
+            - name: LL_COOKIE_SECURE
+              value: "false"
+            - name: LL_BLOB_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: legallens-secrets
+                  key: LL_BLOB_KEY
+            - name: LL_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: legallens-secrets
+                  key: LL_SECRET_KEY
+          volumeMounts:
+            - name: app-data
+              mountPath: /app/data
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 5
+            failureThreshold: 30
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 10
+            failureThreshold: 6
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 20
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 2Gi
+      volumes:
+        - name: app-data
+          persistentVolumeClaim:
+            claimName: legallens-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: legallens-frontend
+  namespace: legallens
+spec:
+  type: ClusterIP
+  selector:
+    app: legallens-frontend
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: legallens-frontend
+  namespace: legallens
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: legallens-frontend
+  template:
+    metadata:
+      labels:
+        app: legallens-frontend
+    spec:
+      containers:
+        - name: frontend
+          image: aks8997-encecwbjexh2gsgu.azurecr.io/legallens-frontend:latest
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: BACKEND_URL
+              value: http://legallens-backend:8000
+          readinessProbe:
+            httpGet:
+              path: /nginx-health
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /nginx-health
+              port: http
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi

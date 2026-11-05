@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   publish:
-    name: Publish ${{ matrix.service }} image
+    name: Publish ${{ matrix.service }} image to ACR
     if: >-
       github.event.workflow_run.conclusion == 'success' &&
       github.event.workflow_run.event == 'push' &&
@@ -49,7 +49,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: aks8997.azurecr.io/legallens-${{ matrix.service }}
+          images: aks8997-encecwbjexh2gsgu.azurecr.io/legallens-${{ matrix.service }}
           tags: |
             type=raw,value=latest
             type=raw,value=sha-${{ github.event.workflow_run.head_sha }}
@@ -63,3 +63,68 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha,scope=cd-${{ matrix.service }}
           cache-to: type=gha,mode=max,scope=cd-${{ matrix.service }}
+
+  deploy:
+    name: Deploy to AKS
+    needs: publish
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-latest
+    environment: production
+    concurrency:
+      group: legallens-aks-production
+      cancel-in-progress: false
+    env:
+      IMAGE_TAG: sha-${{ github.event.workflow_run.head_sha }}
+    steps:
+      - name: Check out tested commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v4
+
+      - name: Configure namespace-scoped kubeconfig
+        env:
+          KUBE_CONFIG: ${{ secrets.KUBE_CONFIG }}
+        run: |
+          set -euo pipefail
+          test -n "$KUBE_CONFIG" || { echo "KUBE_CONFIG environment secret is required" >&2; exit 1; }
+          printf '%s' "$KUBE_CONFIG" > "$RUNNER_TEMP/kubeconfig"
+          chmod 600 "$RUNNER_TEMP/kubeconfig"
+          echo "KUBECONFIG=$RUNNER_TEMP/kubeconfig" >> "$GITHUB_ENV"
+
+      - name: Create or update backend secrets
+        env:
+          LL_BLOB_KEY: ${{ secrets.LL_BLOB_KEY }}
+          LL_SECRET_KEY: ${{ secrets.LL_SECRET_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$LL_BLOB_KEY" || { echo "LL_BLOB_KEY environment secret is required" >&2; exit 1; }
+          test -n "$LL_SECRET_KEY" || { echo "LL_SECRET_KEY environment secret is required" >&2; exit 1; }
+          kubectl create secret generic legallens-secrets \
+            --namespace legallens \
+            --from-literal=LL_BLOB_KEY="$LL_BLOB_KEY" \
+            --from-literal=LL_SECRET_KEY="$LL_SECRET_KEY" \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Apply Kubernetes manifests
+        run: kubectl apply -f k8s/app.yaml
+
+      - name: Roll out tested images
+        run: |
+          set -euo pipefail
+          registry=aks8997-encecwbjexh2gsgu.azurecr.io
+          kubectl set image deployment/legallens-backend \
+            backend="$registry/legallens-backend:$IMAGE_TAG" \
+            --namespace legallens
+          kubectl set image deployment/legallens-frontend \
+            frontend="$registry/legallens-frontend:$IMAGE_TAG" \
+            --namespace legallens
+          kubectl rollout status deployment/legallens-backend --namespace legallens --timeout=10m
+          kubectl rollout status deployment/legallens-frontend --namespace legallens --timeout=5m
+          kubectl get pods,services,persistentvolumeclaims --namespace legallens
