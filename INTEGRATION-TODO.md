@@ -551,3 +551,28 @@ and unreachable from the UI — the composer disables send while a turn streams,
 concurrent sends into the *same* thread (different conversations are unaffected). It wants a retry on
 the integrity error or a per-conversation counter, and it should be fixed before anything can drive
 the API concurrently.
+
+## 8. AKS deployment status — 2026-11-04
+
+The deployment runbook is [docs/deployment/aks.md](docs/deployment/aks.md). This checklist tracks the separate cloud deployment work; it does not change the completion status of the M2/M3 frontend, backend, or integration tasks above.
+
+### Completed and verified
+
+- [x] AKS cluster `aksaikubernetes` in `aksaiproject` is provisioned and has Ready nodes.
+- [x] ACR `aks8997` login server is verified as `aks8997-encecwbjexh2gsgu.azurecr.io`.
+- [x] GitHub OIDC app identity and `production` environment federated credential are configured in Azure.
+- [x] GitHub identity has ABAC-conditioned `Container Registry Repository Writer` access to `legallens-backend` and `legallens-frontend`.
+- [x] AKS kubelet identity has ABAC-conditioned `Container Registry Repository Reader` access to those repositories.
+- [x] `legallens` namespace and namespace-scoped GitHub deployer Role/RoleBinding are applied; authorization was verified to be denied outside that namespace.
+- [x] Backend/frontend Deployments, internal Services, and persistent data claim are defined in `k8s/app.yaml` and passed AKS server-side dry-run validation.
+- [x] CD workflow builds/publishes commit-tagged images and has an AKS rollout job.
+- [x] AKS deployment runbook added and linked from the root README.
+
+### Still pending or not yet verified
+
+- [ ] Confirm the five `production` environment secrets exist in GitHub: `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `KUBE_CONFIG`, `LL_BLOB_KEY`, and `LL_SECRET_KEY`.
+- [ ] Confirm a successful GitHub Actions CI run followed by successful ACR publication and AKS rollout.
+- [ ] Verify live pod readiness, service health, and persistent-volume binding after the first rollout.
+- [ ] Establish a secure initial production user; do not run the dev seed command in production.
+- [ ] Add public ingress/gateway, DNS, TLS, and set `LL_COOKIE_SECURE=true` before exposing the app publicly.
+- [ ] Revisit SQLite/single-replica storage before scaling or requiring high availability.

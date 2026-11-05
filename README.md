@@ -40,6 +40,9 @@ frontend/    React 19 · TypeScript · Vite · Tailwind v4 · zustand · Radix
 docs/        BRD/PRD/FRD, glossary, technical architecture
 ```
 
+AKS/ACR deployment architecture, GitHub environment setup, rollout checks, and
+remaining production gaps are documented in the [AKS deployment runbook](docs/deployment/aks.md).
+
 Each has its own README: [backend](backend/README.md) for the API, the data model and what M4
 replaces; [frontend](frontend/README.md) for the API seam, the design system and how it reaches the
 backend.
@@ -47,6 +50,9 @@ backend.
 The build plans are kept as working documents rather than history:
 [BACKEND-TODO.md](BACKEND-TODO.md), [FRONTEND-TODO.md](FRONTEND-TODO.md) and
 [INTEGRATION-TODO.md](INTEGRATION-TODO.md).
+
+The AKS deployment foundation is configured, but the application is not considered deployed until
+the GitHub production secrets are configured and the first CD rollout and health checks succeed.
 
 ## Where it stands
 
