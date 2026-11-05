@@ -67,7 +67,89 @@ The local deployer kubeconfig is at `~/.kube/legallens-github-kubeconfig` with f
    KUBECONFIG=/tmp/legallens-aks-kubeconfig kubectl port-forward -n legallens svc/legallens-frontend 8080:80
    ```
 
-   Then open `http://localhost:8080`.
+    Then open `http://localhost:8080`. This is a local tunnel URL, not a public AKS URL. It works only while the command remains running and after the CD rollout has created the Services and ready Pods.
+
+   In the terminal used for the cURL examples, set:
+
+   ```bash
+   export BASE_URL=http://localhost:8080
+   ```
+
+## Private URLs and Postman/cURL
+
+There is currently **no public application URL or external IP**. Both Kubernetes Services use `ClusterIP`. Check that with:
+
+```bash
+KUBECONFIG=/tmp/legallens-aks-kubeconfig kubectl get services -n legallens
+```
+
+For browser and API access through the frontend's same-origin NGINX proxy, start this in a terminal and leave it running:
+
+```bash
+KUBECONFIG=/tmp/legallens-aks-kubeconfig kubectl port-forward -n legallens svc/legallens-frontend 8080:80
+```
+
+Set the Postman collection variable `baseUrl` to `http://localhost:8080`. The same URL is used in the cURL examples below. For direct backend API testing, use a second terminal and tunnel the backend Service instead:
+
+```bash
+KUBECONFIG=/tmp/legallens-aks-kubeconfig kubectl port-forward -n legallens svc/legallens-backend 8000:8000
+```
+
+Then set `baseUrl` to `http://localhost:8000`. Stop either tunnel with `Ctrl+C`. These hostnames are local to the machine running `kubectl`; they are not reachable from other users or Postman Cloud Agent. Use Postman's Desktop Agent or the Postman Desktop app.
+
+### Health checks
+
+These endpoints do not require login:
+
+```bash
+curl -i "$BASE_URL/healthz"
+curl -i "$BASE_URL/readyz"
+```
+
+Expect HTTP `200` when the service is responding. `/readyz` reports dependency and AI-engine readiness; a degraded fixture engine can still be healthy as an HTTP service.
+
+### Login and keep the session cookie
+
+Use a production account provisioned through your approved account-creation process. Do not use the development seed credentials in production. cURL stores the `HttpOnly` session cookie in a local cookie jar and sends it on subsequent requests:
+
+```bash
+BASE_URL=http://localhost:8080
+curl -i -c /tmp/legallens-cookies.txt \
+   -H 'Content-Type: application/json' \
+   -d '{"email":"<YOUR_EMAIL>","password":"<YOUR_PASSWORD>"}' \
+   "$BASE_URL/api/auth/login"
+
+curl -i -b /tmp/legallens-cookies.txt \
+   "$BASE_URL/api/auth/me"
+```
+
+Do not put real passwords in a shared shell history or documentation. In Postman, create a `POST {{baseUrl}}/api/auth/login` request with the same JSON body and `Content-Type: application/json`. Keep Postman's cookie jar enabled for `localhost`; it should retain the `ll_session` cookie from the login response and send it on later requests.
+
+### Ask (SSE response)
+
+After login, this request streams Server-Sent Events. Use `curl -N` so output is not buffered:
+
+```bash
+curl -N -b /tmp/legallens-cookies.txt \
+   -H 'Content-Type: application/json' \
+   -H 'Accept: text/event-stream' \
+   -H "Idempotency-Key: $(uuidgen | tr '[:upper:]' '[:lower:]')" \
+   -d '{"text":"What happens on a change of control?","mode":"ask","scope":{"kind":"workspace","documentIds":[]}}' \
+   "$BASE_URL/api/ask"
+```
+
+The body can also be used in Postman as `POST {{baseUrl}}/api/ask`, with the same headers and raw JSON body. Postman versions that support streaming responses show SSE frames; otherwise use cURL for incremental token output. The SSE body contains `event:` lines and JSON `data:` lines. Requests to `/api/ask`, `/api/summarize`, `/api/draft`, and conversation routes require the session cookie.
+
+Logout revokes the server-side session and clears the cookie:
+
+```bash
+curl -i -b /tmp/legallens-cookies.txt -c /tmp/legallens-cookies.txt \
+   -X POST "$BASE_URL/api/auth/logout"
+```
+
+### Direct AKS service tunnel URLs
+
+From inside the `legallens` namespace, the frontend talks to `http://legallens-backend:8000`. The Kubernetes service DNS names are private to the cluster. Do not configure Postman or a public browser to use those service DNS names directly; use one of the local port-forward URLs above until ingress and TLS are configured.
 
 ## Operational Gaps
 
